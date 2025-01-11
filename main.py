@@ -1,223 +1,400 @@
-# main.py
-
+import streamlit as st
 import os
+import pandas as pd
+import statistics
+import io
+
 from pointGeneratorUnif import PointGeneratorUnif
 from grid import Grid
-from kNN import kNN
-from linearScan import LinearScan
-from spatialJoinPBSM import SpatialJoinPBSM
-from naiveSpatialJoin import NaiveSpatialJoin
-from utils import Utils
+from kNN import kNN  # kNN.knn() -> (results, stats_str)
+from linearScan import LinearScan  # ls.knn() -> (results, stats_str)
+from spatialJoinPBSM import SpatialJoinPBSM  # pbsmsj.execute_join() -> (results, stats_str)
+from naiveSpatialJoin import NaiveSpatialJoin  # naive_sj.execute_join() -> (results, stats_str)
+from skyline_query import SkylineQuery  # sq.sky_query() -> (results, stats_str)
 
-def clear_screen():
-    """Καθαρισμός οθόνης."""
-    os.system('cls' if os.name == 'nt' else 'clear')
+import folium
+from streamlit_folium import st_folium
 
-def pause():
-    """Περιμένει από τον χρήστη να πατήσει Enter."""
-    input("\nΠάτα Enter για να συνεχίσεις...")
+# ------------------------------------------------------
+# Βοηθητικές Συναρτήσεις για αποθήκευση και εμφάνιση
+# ------------------------------------------------------
 
-def save_results(results, algorithm_name):
-    """Αποθηκεύει τα αποτελέσματα σε αρχείο .txt αν ο χρήστης το επιθυμεί."""
+def save_results(results, algorithm_name, stats=None):
+    """
+    Αποθήκευση αποτελεσμάτων + (προαιρετικά) στατιστικών σε αρχείο .txt,
+    με τη βοήθεια download_button. Δεν αφήνει φυσικό αρχείο στον δίσκο,
+    είναι in-memory (StringIO).
+    """
     if not results:
-        print(f"Δεν υπάρχουν αποτελέσματα για αποθήκευση στον {algorithm_name} Spatial Join.")
+        st.warning(f"Δεν υπάρχουν αποτελέσματα για αποθήκευση στον {algorithm_name}.")
         return
 
-    save_option = input(f"\nΘέλεις να αποθηκεύσεις τα αποτελέσματα του {algorithm_name} Spatial Join σε αρχείο .txt; (ναι/όχι): ").strip().lower()
-    if save_option in ['ναι', 'yes']:
-        filename = input("Δώσε το όνομα του αρχείου (π.χ., results_kNN.txt): ").strip()
-        if not filename.endswith('.txt'):
-            filename += '.txt'
-        try:
-            with open(filename, 'w') as f:
-                # Γράψε μια επικεφαλίδα για καλύτερη κατανόηση
-                if algorithm_name in ['PBSM', 'Naive']:
-                    f.write("Dataset_A_ID\tDataset_B_ID\n")  # Για Spatial Joins
-                elif algorithm_name in ['k-NN', 'Linear Scan']:
-                    f.write("Dataset_ID\tDistance\n")  # Για k-NN και Linear Scan k-NN
-                # Προσθέστε περισσότερες επικεφαλίδες αν χρειάζεται
+    st.info(f"Αποθήκευση αποτελεσμάτων {algorithm_name} σε τοπικό αρχείο (.txt):")
 
-                for pair in results:
-                    if algorithm_name in ['PBSM', 'Naive']:
-                        a, b = pair
-                        f.write(f"{a}\t{b}\n")  # Αποθήκευση με tab ως διαχωριστή
-                    elif algorithm_name in ['k-NN', 'Linear Scan']:
-                        dist, obj = pair
-                        f.write(f"{obj.id}\t{dist:.4f}\n")  # Αποθήκευση ID και απόστασης
-            print(f"Τα αποτελέσματα αποθηκεύτηκαν επιτυχώς στο αρχείο '{filename}'.")
-        except Exception as e:
-            print(f"Σφάλμα κατά την αποθήκευση του αρχείου: {e}")
-    else:
-        print("Τα αποτελέσματα δεν αποθηκεύτηκαν.")
+    output = io.StringIO()
 
-def main_menu():
-    clear_screen()
-    print("\n=== Μενού Επιλογών ===")
-    print("1. Δημιουργία Αρχείου Δεδομένων")
-    print("2. Εκτέλεση Linear Scan (Γραμμική Σάρωση)")
-    print("3. Εκτέλεση k-NN Αναζήτησης με Grid")
-    print("4. Εκτέλεση Spatial Join με PBSM")
-    print("5. Εκτέλεση Naive Spatial Join")
-    print("6. Έξοδος")
-    print("=======================")
+    # 1. Αν υπάρχουν στατιστικά, τα γράφουμε πρώτα
+    if stats:
+        output.write(stats)
+        output.write("\n")
 
-def create_data_file(grid):
-    """Δημιουργία αρχείου δεδομένων."""
-    clear_screen()
-    filename = input("Δώσε όνομα αρχείου για το dataset (π.χ., data1.csv): ").strip()
-    if not filename:
-        print("Το όνομα αρχείου δεν μπορεί να είναι κενό.")
-        pause()
-        return
-    try:
-        num_rectangles = int(input("Δώσε τον αριθμό ορθογωνίων που θέλεις να δημιουργήσεις: "))
-    except ValueError:
-        print("Μη έγκυρος αριθμός. Παρακαλώ εισήγαγε έναν ακέραιο.")
-        pause()
-        return
-    try:
-        # Ζητάμε από τον χρήστη να καθορίσει σε ποιο σύνολο θα ανήκει το dataset (A ή B)
-        dataset_label = input("Δώσε το label του dataset (A ή B): ").strip().upper()
-        if dataset_label not in ['A', 'B']:
-            print("Μη έγκυρο label. Χρησιμοποίησε 'A' ή 'B'.")
-            pause()
-            return
-        generator = PointGeneratorUnif(filename, grid.xL, grid.yL, grid.xU, grid.yU)
-        generator.generate_rectangles(num_rectangles, include_id=True, dataset_label=dataset_label)
-    except Exception as e:
-        print(f"Σφάλμα κατά τη δημιουργία των ορθογωνίων: {e}")
-        pause()
-        return
-    print(f"Το αρχείο '{filename}' δημιουργήθηκε με {num_rectangles} ορθογωνία εντός του Grid.")
-    pause()
+    # 2. Γράφουμε επικεφαλίδες
+    if algorithm_name in ['PBSM', 'Naive']:
+        output.write("Dataset_A_ID\tDataset_B_ID\n")
+    elif algorithm_name in ['k-NN', 'Linear Scan']:
+        output.write("Dataset_ID\tDistance\n")
+    elif algorithm_name == 'Skyline':
+        output.write("Skyline Points (ID, xmin, ymin, xmax, ymax):\n")
 
-def execute_linear_scan():
-    """Εκτέλεση Linear Scan k-NN."""
-    clear_screen()
-    filename = input("Δώσε το όνομα αρχείου δεδομένων (π.χ., data1.csv): ").strip()
-    if not os.path.exists(filename):
-        print(f"Το αρχείο '{filename}' δεν υπάρχει. Δημιουργήστε το πρώτα.")
-        pause()
-        return
-    ls = LinearScan(filename)
-    try:
-        qx = float(input("Δώσε x-συντεταγμένη για το σημείο αναζήτησης: "))
-        qy = float(input("Δώσε y-συντεταγμένη για το σημείο αναζήτησης: "))
-        k = int(input("Δώσε τον αριθμό k για τους κοντινότερους γείτονες: "))
-    except ValueError:
-        print("Μη έγκυρες τιμές εισόδου. Παρακαλώ εισήγαγε αριθμούς.")
-        pause()
-        return
-    results = ls.knn(qx, qy, k)
-    print(f"\nΒρέθηκαν {len(results)} κοντινότεροι γείτονες (Linear Scan):")
-    for dist, obj in results:
-        print(f"{obj} με απόσταση {dist:.4f}")
-    # Πρόσθεση της δυνατότητας αποθήκευσης
-    save_results(results, "Linear Scan")
-    pause()
+    # 3. Γράφουμε τα αποτελέσματα
+    for pair in results:
+        if algorithm_name in ['PBSM', 'Naive']:
+            a, b = pair
+            output.write(f"{a.id}\t{b.id}\n")
+        elif algorithm_name in ['k-NN', 'Linear Scan']:
+            dist, obj = pair
+            output.write(f"{obj.id}\t{dist:.4f}\n")
+        elif algorithm_name == 'Skyline':
+            obj = pair
+            output.write(f"{obj.id}, {obj.xmin}, {obj.ymin}, {obj.xmax}, {obj.ymax}\n")
 
-def knn_with_grid(grid):
-    """Εκτέλεση k-NN με χρήση Grid."""
-    clear_screen()
-    filename = input("Δώσε το όνομα αρχείου δεδομένων για τον k-NN αλγόριθμο (π.χ., data1.csv): ").strip()
-    if not os.path.exists(filename):
-        print(f"Το αρχείο '{filename}' δεν υπάρχει. Δημιουργήστε το πρώτα.")
-        pause()
-        return
-    try:
-        qx = float(input("Δώσε x-συντεταγμένη για το σημείο αναζήτησης: "))
-        qy = float(input("Δώσε y-συντεταγμένη για το σημείο αναζήτησης: "))
-        k = int(input("Δώσε τον αριθμό k για τους κοντινότερους γείτονες: "))
-    except ValueError:
-        print("Μη έγκυρες τιμές εισόδου. Παρακαλώ εισήγαγε αριθμούς.")
-        pause()
-        return
-    # Φόρτωση του dataset στον Grid ως 'single'
-    grid.load(filename, dataset_label='single')
-    results = kNN.knn(grid, qx, qy, k)
-    print(f"\nΒρέθηκαν {len(results)} κοντινότεροι γείτονες (Grid k-NN):")
-    for dist, res in results:
-        print(f"{res} με απόσταση {dist:.4f}")
-    # Πρόσθεση της δυνατότητας αποθήκευσης
-    save_results(results, "k-NN")
-    pause()
+    data_str = output.getvalue()
+    output.close()
 
-def execute_spatial_join_pbsm(grid):
-    """Εκτέλεση Spatial Join με PBSM."""
-    clear_screen()
-    print("Θα χρειαστεί να καθορίσεις δύο datasets για τον Spatial Join με PBSM.")
-    filename_A = input("Δώσε το όνομα αρχείου δεδομένων για το σύνολο A (π.χ., dataA.csv): ").strip()
-    filename_B = input("Δώσε το όνομα αρχείου δεδομένων για το σύνολο B (π.χ., dataB.csv): ").strip()
-    if not os.path.exists(filename_A):
-        print(f"Το αρχείο '{filename_A}' δεν υπάρχει. Δημιουργήστε το πρώτα.")
-        pause()
-        return
-    if not os.path.exists(filename_B):
-        print(f"Το αρχείο '{filename_B}' δεν υπάρχει. Δημιουργήστε το πρώτα.")
-        pause()
-        return
-    grid.load(filename_A, dataset_label='A')
-    grid.load(filename_B, dataset_label='B')
-    print("Εκτέλεση Spatial Join με PBSM...")
-    pbsmsj = SpatialJoinPBSM(grid)
-    pbsmsj_results = pbsmsj.execute_join()
-    print(f"Αποτελέσματα PBSM: {len(pbsmsj_results)} ζεύγη.")
+    default_filename = f"results_{algorithm_name}.txt"
 
-    # Πρόσθεση της δυνατότητας αποθήκευσης
-    save_results(pbsmsj_results, "PBSM")
-    
-    pause()
+    st.download_button(
+        label="Κατέβασε το αρχείο αποτελεσμάτων",
+        data=data_str,
+        file_name=default_filename,
+        mime="text/plain"
+    )
 
-def execute_naive_spatial_join(grid):
-    """Εκτέλεση Naive Spatial Join."""
-    clear_screen()
-    print("Θα χρειαστεί να καθορίσεις δύο datasets για τον Naive Spatial Join.")
-    filename_A = input("Δώσε το όνομα αρχείου δεδομένων για το σύνολο A (π.χ., dataA.csv): ").strip()
-    filename_B = input("Δώσε το όνομα αρχείου δεδομένων για το σύνολο B (π.χ., dataB.csv): ").strip()
-    if not os.path.exists(filename_A):
-        print(f"Το αρχείο '{filename_A}' δεν υπάρχει. Δημιουργήστε το πρώτα.")
-        pause()
+def display_map(all_points, skyline_points=None):
+    """
+    Δημιουργεί κι εμφανίζει έναν Folium χάρτη μέσα σε Streamlit,
+    με markers για όλα τα σημεία (μπλε) και τα Skyline (κόκκινο).
+    Υποθέτουμε xmin=lon, ymin=lat.
+    """
+    if not all_points:
+        st.info("Δεν υπάρχουν δεδομένα για εμφάνιση στον χάρτη.")
         return
-    if not os.path.exists(filename_B):
-        print(f"Το αρχείο '{filename_B}' δεν υπάρχει. Δημιουργήστε το πρώτα.")
-        pause()
-        return
-    grid.load(filename_A, dataset_label='A')
-    grid.load(filename_B, dataset_label='B')
-    print("Εκτέλεση Naive Spatial Join...")
-    naive_sj = NaiveSpatialJoin(grid.get_dataset('A'), grid.get_dataset('B'))
-    naive_sj_results = naive_sj.execute_join()
-    print(f"Αποτελέσματα Naive: {len(naive_sj_results)} ζεύγη.")
 
-    # Πρόσθεση της δυνατότητας αποθήκευσης
-    save_results(naive_sj_results, "Naive")
-    
-    pause()
+    lats = [p.ymin for p in all_points]
+    lons = [p.xmin for p in all_points]
+    center_lat = statistics.mean(lats)
+    center_lon = statistics.mean(lons)
 
+    folium_map = folium.Map(location=[center_lat, center_lon], zoom_start=12)
+
+    # Μπλε markers = all_points
+    for p in all_points:
+        lat = p.ymin
+        lon = p.xmin
+        popup_text = f"ID: {p.id}"
+        folium.Marker(
+            [lat, lon],
+            popup=popup_text,
+            icon=folium.Icon(color='blue', icon='info-sign')
+        ).add_to(folium_map)
+
+    # Κόκκινα markers = skyline_points
+    if skyline_points:
+        for sp in skyline_points:
+            lat = sp.ymin
+            lon = sp.xmin
+            popup_text = f"Skyline ID: {sp.id}"
+            folium.Marker(
+                [lat, lon],
+                popup=popup_text,
+                icon=folium.Icon(color='red', icon='star')
+            ).add_to(folium_map)
+
+    st_folium(folium_map, width=700, height=500)
+
+# ------------------------------------------------------
+# Κύρια λογική της εφαρμογής (Streamlit)
+# ------------------------------------------------------
 def main():
-    """Κύρια λειτουργία του προγράμματος."""
-    # Καθορισμός σταθερών ορίων για το grid
-    grid = Grid(0, 0, 100, 100, 10)  # Δημιουργία Grid με τα όρια που θέλουμε
+    st.title("Spatial Data Processing with Streamlit (Robust Temporary File Deletion)")
+    st.write("""
+    Εδώ εκτελούμε αλγορίθμους (Linear Scan, k-NN, PBSM, Naive Join, Skyline)
+    και εμφανίζουμε/αποθηκεύουμε τα αποτελέσματα **μαζί με** τα στατιστικά τους!
+    """)
 
-    while True:
-        main_menu()
-        choice = input("Δώσε την επιλογή σου: ").strip()
-        if choice == "1":
-            create_data_file(grid)  # Δημιουργία δεδομένων χωρίς ανάθεση σε σύνολο
-        elif choice == "2":
-            execute_linear_scan()
-        elif choice == "3":
-            knn_with_grid(grid)
-        elif choice == "4":
-            execute_spatial_join_pbsm(grid)
-        elif choice == "5":
-            execute_naive_spatial_join(grid)
-        elif choice == "6":
-            print("Έξοδος από το πρόγραμμα.")
-            break
+    # -- Δημιουργία / επιλογή του Grid --
+    with st.sidebar:
+        st.header("Grid Settings")
+        xL = st.number_input("xL", value=0.0)
+        yL = st.number_input("yL", value=0.0)
+        xU = st.number_input("xU", value=100.0)
+        yU = st.number_input("yU", value=100.0)
+        m = st.number_input("m (διαμερίσεις)", min_value=1, value=10)
+        if st.button("Create/Reset Grid"):
+            st.session_state["grid"] = Grid(xL, yL, xU, yU, m)
+            st.success(f"Δημιουργήθηκε νέο Grid με m={m} [{xL},{yL}] - [{xU},{yU}]")
+
+    if "grid" not in st.session_state:
+        st.session_state["grid"] = Grid(0, 0, 100, 100, 10)
+
+    grid = st.session_state["grid"]
+
+    st.write("## Επιλογές Ενεργειών")
+    menu = [
+        "1. Δημιουργία Αρχείου Δεδομένων (PointGeneratorUnif)",
+        "2. Εκτέλεση Linear Scan (Γραμμική Σάρωση)",
+        "3. Εκτέλεση k-NN Αναζήτησης με Grid",
+        "4. Εκτέλεση Spatial Join με PBSM",
+        "5. Εκτέλεση Naive Spatial Join",
+        "6. Εκτέλεση Skyline Query με Grid"
+    ]
+    choice = st.selectbox("Επίλεξε ενέργεια:", menu)
+
+    # ------------------------------------
+    # 1. Δημιουργία Αρχείου Δεδομένων
+    # ------------------------------------
+    if choice == menu[0]:
+        st.subheader("Δημιουργία Αρχείου Δεδομένων")
+        filename = st.text_input("Δώσε όνομα αρχείου (π.χ., data1.csv)", "data1.csv")
+        num_rect = st.number_input("Αριθμός ορθογωνίων:", min_value=1, value=10)
+        dataset_label = st.selectbox("Label dataset", ["A", "B", "default"])
+        if st.button("Δημιουργία"):
+            generator = PointGeneratorUnif(filename, grid.xL, grid.yL, grid.xU, grid.yU)
+            try:
+                generator.generate_rectangles(num_rect, include_id=True, dataset_label=dataset_label)
+                st.success(f"Δημιουργήθηκε το αρχείο {filename} με {num_rect} ορθογώνια.")
+            except Exception as e:
+                st.error(f"Σφάλμα: {e}")
+
+    # ------------------------------------
+    # 2. Linear Scan
+    # ------------------------------------
+    elif choice == menu[1]:
+        st.subheader("Εκτέλεση Linear Scan k-NN")
+        uploaded_file = st.file_uploader("Φόρτωσε CSV (ID,xmin,ymin,xmax,ymax)", type="csv")
+        if uploaded_file:
+            temp_file = "temp_linear.csv"
+            with open(temp_file, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            st.success(f"Το αρχείο ανέβηκε ως {temp_file}.")
+
+            qx = st.number_input("x (query)", value=10.0)
+            qy = st.number_input("y (query)", value=10.0)
+            k = st.number_input("k (κοντινότεροι γείτονες)", min_value=1, value=3)
+
+            if st.button("Εκτέλεση Linear Scan"):
+                try:
+                    ls = LinearScan(temp_file)
+                    # Τώρα η linearScan.knn() επιστρέφει (results, stats_str)
+                    results, lscan_stats = ls.knn(qx, qy, k)
+
+                    st.write(f"Βρέθηκαν {len(results)} κοντινότεροι γείτονες:")
+                    st.write(lscan_stats)  # Εμφανίζουμε τα στατιστικά στο UI
+
+                    for dist, obj in results:
+                        st.write(f"{obj} - dist={dist:.4f}")
+
+                    # Αποθήκευση στο αρχείο (μαζί με stats)
+                    save_results(results, "Linear Scan", stats=lscan_stats)
+
+                finally:
+                    try:
+                        os.remove(temp_file)
+                        st.info(f"Διαγράφηκε προσωρινό αρχείο '{temp_file}'.")
+                    except FileNotFoundError:
+                        pass
         else:
-            print("Μη έγκυρη επιλογή. Προσπαθήστε ξανά.")
-            pause()
+            st.info("Φόρτωσε ένα CSV για να κάνουμε Linear Scan.")
+
+    # ------------------------------------
+    # 3. k-NN με Grid
+    # ------------------------------------
+    elif choice == menu[2]:
+        st.subheader("Εκτέλεση k-NN με Grid")
+        uploaded_file = st.file_uploader("Φόρτωσε CSV (ID,xmin,ymin,xmax,ymax)", type="csv")
+
+        if uploaded_file:
+            temp_file = "temp_knn.csv"
+            with open(temp_file, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            st.success(f"Το αρχείο ανέβηκε ως {temp_file}.")
+
+            qx = st.number_input("x (query)", value=10.0)
+            qy = st.number_input("y (query)", value=10.0)
+            k = st.number_input("k γείτονες:", min_value=1, value=3)
+
+            if st.button("Φόρτωση + k-NN"):
+                try:
+                    grid.load(temp_file, dataset_label="default")
+                    st.success("Το dataset φορτώθηκε στο Grid (default).")
+
+                    # kNN.knn(...) -> (results, knn_stats)
+                    results, knn_stats = kNN.knn(grid, qx, qy, k)
+
+                    st.write(f"Βρέθηκαν {len(results)} γείτονες:")
+                    st.write(knn_stats)  # Στατιστικά
+
+                    for dist, obj in results:
+                        st.write(f"{obj} - dist={dist:.4f}")
+
+                    # Αποθήκευση
+                    save_results(results, "k-NN", stats=knn_stats)
+
+                finally:
+                    try:
+                        os.remove(temp_file)
+                        st.info(f"Διαγράφηκε προσωρινό αρχείο '{temp_file}'.")
+                    except FileNotFoundError:
+                        pass
+        else:
+            st.info("Φόρτωσε CSV για k-NN με Grid.")
+
+    # ------------------------------------
+    # 4. Spatial Join PBSM
+    # ------------------------------------
+    elif choice == menu[3]:
+        st.subheader("Εκτέλεση Spatial Join PBSM")
+        fileA = st.file_uploader("CSV για σύνολο A", type="csv", key="pbsmA")
+        fileB = st.file_uploader("CSV για σύνολο B", type="csv", key="pbsmB")
+
+        if fileA and fileB:
+            tempA = "temp_pbsmA.csv"
+            tempB = "temp_pbsmB.csv"
+            with open(tempA, "wb") as f:
+                f.write(fileA.getbuffer())
+            with open(tempB, "wb") as f:
+                f.write(fileB.getbuffer())
+            st.success("Αρχεία A,B φορτώθηκαν προσωρινά.")
+
+            if st.button("Φόρτωση + PBSM"):
+                try:
+                    grid.load(tempA, dataset_label='A')
+                    grid.load(tempB, dataset_label='B')
+                    pbsmsj = SpatialJoinPBSM(grid)
+                    # pbsmsj.execute_join() -> (results, stats_str)
+                    results, pbsm_stats = pbsmsj.execute_join()
+
+                    st.write(f"Αποτελέσματα PBSM: {len(results)} ζεύγη.")
+                    st.write(pbsm_stats)
+
+                    save_results(results, "PBSM", stats=pbsm_stats)
+                finally:
+                    for tmp in [tempA, tempB]:
+                        try:
+                            os.remove(tmp)
+                            st.info(f"Διαγράφηκε προσωρινό αρχείο '{tmp}'.")
+                        except FileNotFoundError:
+                            pass
+        else:
+            st.info("Παρακαλώ φόρτωσε 2 αρχεία (A,B) για PBSM.")
+
+    # ------------------------------------
+    # 5. Naive Spatial Join
+    # ------------------------------------
+    elif choice == menu[4]:
+        st.subheader("Naive Spatial Join")
+        fileA = st.file_uploader("CSV A", type="csv", key="naiveA")
+        fileB = st.file_uploader("CSV B", type="csv", key="naiveB")
+
+        if fileA and fileB:
+            tempA = "temp_naiveA.csv"
+            tempB = "temp_naiveB.csv"
+            with open(tempA, "wb") as f:
+                f.write(fileA.getbuffer())
+            with open(tempB, "wb") as f:
+                f.write(fileB.getbuffer())
+            st.success("Αρχεία A,B φορτώθηκαν προσωρινά.")
+
+            if st.button("Φόρτωση + Naive Join"):
+                try:
+                    grid.load(tempA, 'A')
+                    grid.load(tempB, 'B')
+                    naive_sj = NaiveSpatialJoin(grid.get_dataset('A'), grid.get_dataset('B'))
+                    # naive_sj.execute_join() -> (results, stats_str)
+                    results, naive_stats = naive_sj.execute_join()
+
+                    st.write(f"Naive αποτελέσματα: {len(results)}")
+                    st.write(naive_stats)
+
+                    save_results(results, "Naive", stats=naive_stats)
+
+                finally:
+                    for tmp in [tempA, tempB]:
+                        try:
+                            os.remove(tmp)
+                            st.info(f"Διαγράφηκε προσωρινό αρχείο '{tmp}'.")
+                        except FileNotFoundError:
+                            pass
+        else:
+            st.info("Παρακαλώ φόρτωσε αρχεία για A,B.")
+
+    # ------------------------------------
+    # 6. Skyline Query
+    # ------------------------------------
+    elif choice == menu[5]:
+        st.subheader("Skyline Query (Grid)")
+        fileSky = st.file_uploader("CSV για Skyline", type="csv")
+
+        if fileSky:
+            temp_file = "temp_sky.csv"
+            with open(temp_file, "wb") as f:
+                f.write(fileSky.getbuffer())
+            st.success(f"CSV φορτώθηκε προσωρινά ως {temp_file}")
+
+            if st.button("Φόρτωση + Skyline"):
+                try:
+                    # 1. Φόρτωση
+                    grid.load(temp_file, dataset_label='default')
+                    # 2. Εκτέλεση Skyline
+                    sq = SkylineQuery(grid)
+                    # sq.sky_query() -> (skyline_points, sky_stats)
+                    skyline_points, sky_stats = sq.sky_query()
+
+                    st.write(f"Βρέθηκαν {len(skyline_points)} σημεία Skyline:")
+                    st.write(sky_stats)
+
+                    for sp in skyline_points:
+                        st.write(str(sp))
+
+                    # 3. Προσφέρουμε save_results
+                    save_results(skyline_points, "Skyline", stats=sky_stats)
+
+                    # 4. Αποθήκευση σε session_state για το χάρτη
+                    df = pd.read_csv(temp_file)
+                    pseudo_list = []
+                    for idx, row in df.iterrows():
+                        class PseudoObj:
+                            def __init__(self, id, xmin, ymin, xmax, ymax):
+                                self.id = id
+                                self.xmin = float(xmin)
+                                self.ymin = float(ymin)
+                                self.xmax = float(xmax)
+                                self.ymax = float(ymax)
+                        p = PseudoObj(row["ID"], row["xmin"], row["ymin"], row["xmax"], row["ymax"])
+                        pseudo_list.append(p)
+
+                    st.session_state["skyline_all_points"] = pseudo_list
+                    st.session_state["skyline_points"] = skyline_points
+
+                finally:
+                    # 5. Διαγραφή αρχείου
+                    try:
+                        os.remove(temp_file)
+                        st.info(f"Διαγράφηκε προσωρινό αρχείο '{temp_file}'.")
+                    except FileNotFoundError:
+                        pass
+
+        else:
+            st.info("Φόρτωσε ένα CSV για Skyline.")
+
+        # Εμφάνιση χάρτη (με checkbox)
+        show_map = st.checkbox("Προβολή σε χάρτη")
+        if show_map:
+            if "skyline_all_points" in st.session_state and "skyline_points" in st.session_state:
+                display_map(st.session_state["skyline_all_points"], st.session_state["skyline_points"])
+            else:
+                st.warning("Δεν υπάρχουν δεδομένα για εμφάνιση σε χάρτη.")
+
 
 if __name__ == "__main__":
     main()

@@ -1,25 +1,37 @@
-# cell.py
-
 from MBR import MBR
 
 class Cell:
     def __init__(self, xmin, ymin, xmax, ymax):
+        """
+        Μια Cell (κελί) περιέχει ένα MBR οριοθέτησης και
+        ένα λεξικό για αποθήκευση MBRs διαφορετικών datasets.
+        
+        :param xmin: Ελάχιστο x-όριο του κελιού
+        :param ymin: Ελάχιστο y-όριο του κελιού
+        :param xmax: Μέγιστο x-όριο του κελιού
+        :param ymax: Μέγιστο y-όριο του κελιού
+        """
         self.mbr = MBR(None, xmin, ymin, xmax, ymax)  # Ορίζουμε id=None για κελιά του grid
-        self.objects_A = []
-        self.objects_B = []
-        self.objects_default = []  # Για single-dataset αλγορίθμους
+        # Αντί για 3 ξεχωριστές λίστες (objects_A, objects_B, objects_default),
+        # χρησιμοποιούμε ένα λεξικό όπου κάθε key είναι το dataset_label (π.χ. 'A','B','default','C' κ.λπ.).
+        self.objects = {}
 
     def add_object(self, mbr, dataset_label='default'):
-        """Προσθέτει ένα αντικείμενο στο κατάλληλο σύνολο."""
-        if dataset_label == 'A':
-            self.objects_A.append(mbr)
-        elif dataset_label == 'B':
-            self.objects_B.append(mbr)
-        else:
-            self.objects_default.append(mbr)
+        """
+        Προσθέτει ένα αντικείμενο (MBR) στο λεξικό self.objects
+        βάσει του dataset_label.
+
+        :param mbr: Το MBR αντικείμενο που θέλουμε να αποθηκεύσουμε
+        :param dataset_label: Ετικέτα dataset (π.χ. 'A', 'B', 'default', κ.λπ.)
+        """
+        if dataset_label not in self.objects:
+            self.objects[dataset_label] = []
+        self.objects[dataset_label].append(mbr)
 
     def __repr__(self):
-        return (f"Cell(mbr={self.mbr}, "
-                f"objects_A={len(self.objects_A)}, "
-                f"objects_B={len(self.objects_B)}, "
-                f"objects_default={len(self.objects_default)})")
+        """
+        Επιστρέφει μια συμβολοσειρά που παρουσιάζει το MBR του κελιού
+        και τον αριθμό αντικειμένων ανά dataset_label.
+        """
+        objects_summary = {k: len(v) for k, v in self.objects.items()}
+        return f"Cell(mbr={self.mbr}, objects={objects_summary})"
