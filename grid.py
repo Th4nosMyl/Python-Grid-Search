@@ -1,25 +1,33 @@
+# grid.py
+
 from MBR import MBR
 from cell import Cell
 
 class Grid:
+    """
+    Κλάση που αναπαριστά ένα πλέγμα (Grid) αποτελούμενο από m x m κελιά (Cells).
+    Χρησιμοποιείται για τη διαχείριση και ανάθεση MBRs σε διαφορετικά datasets
+    μέσα στην περιοχή [xL, xU] x [yL, yU].
+    """
+
     def __init__(self, xL, yL, xU, yU, m):
         """
-        Δημιουργεί ένα πλέγμα (Grid) από m x m κελιά (Cell), καλύπτοντας την
-        περιοχή [xL, xU] x [yL, yU].
-        
-        :param xL: Ελάχιστο x-όριο όλου του πλέγματος
-        :param yL: Ελάχιστο y-όριο όλου του πλέγματος
-        :param xU: Μέγιστο x-όριο όλου του πλέγματος
-        :param yU: Μέγιστο y-όριο όλου του πλέγματος
-        :param m:   Πλήθος κελιών κατά άξονα (διάσταση του grid)
+        Αρχικοποιεί το Grid, δημιουργώντας m x m κελιά για την περιοχή
+        [xL, xU] x [yL, yU].
+
+        :param xL: Ελάχιστο x-όριο όλου του πλέγματος.
+        :param yL: Ελάχιστο y-όριο όλου του πλέγματος.
+        :param xU: Μέγιστο x-όριο όλου του πλέγματος.
+        :param yU: Μέγιστο y-όριο όλου του πλέγματος.
+        :param m:  Πλήθος κελιών ανά άξονα. Το τελικό Grid θα έχει m x m κελιά.
         """
         self.xL = xL
         self.yL = yL
         self.xU = xU
         self.yU = yU
-        self.m = m  # Αριθμός διαίρεσης σε κάθε άξονα
+        self.m = m
 
-        # Δημιουργία 2D λίστας (m x m) με κελιά
+        # Δημιουργία 2D λίστας κελιών (m x m).
         self.cells = [
             [
                 Cell(
@@ -33,21 +41,17 @@ class Grid:
             for i in range(m)
         ]
 
-        # Λεξικό για να αποθηκεύουμε τα datasets που φορτώνουμε (π.χ. {'A': [...], 'B': [...], ...})
+        # Λεξικό για την αποθήκευση των datasets (π.χ. {'A': [...], 'B': [...]}).
         self.datasets = {}
 
     def load(self, filename, dataset_label='default'):
         """
-        Φορτώνει ένα dataset από αρχείο CSV που περιέχει γραμμές της μορφής:
-        
-            id, xmin, ymin, xmax, ymax
-        
-        και το αποθηκεύει στο λεξικό self.datasets[dataset_label].
-        Στη συνέχεια καλεί τη συναρτηση assign_to_cells για να τοποθετήσει
-        τα MBRs στα κελιά.
+        Φορτώνει ένα dataset από ένα CSV αρχείο και το αποθηκεύει στο λεξικό
+        self.datasets[dataset_label]. Στη συνέχεια καλεί τη μέθοδο assign_to_cells
+        για να τοποθετήσει τα MBRs στα αντίστοιχα κελιά του Grid.
 
-        :param filename: Όνομα του αρχείου CSV
-        :param dataset_label: Ετικέτα με την οποία θα αποθηκευτεί το dataset στο Grid
+        :param filename: Όνομα του αρχείου CSV (με γραμμές: ID,xmin,ymin,xmax,ymax).
+        :param dataset_label: Ετικέτα (string) για το συγκεκριμένο dataset.
         """
         if dataset_label in self.datasets:
             print(f"Το σύνολο '{dataset_label}' υπάρχει ήδη. Θα αντικατασταθεί.")
@@ -55,13 +59,11 @@ class Grid:
         data = []
         try:
             with open(filename, 'r') as file:
-                header = next(file)  # Παράκαμψη της επικεφαλίδας
-
+                header = next(file, None)  # Παράκαμψη επικεφαλίδας, αν υπάρχει
                 for line in file:
                     parts = line.strip().split(',')
                     if len(parts) != 5:
-                        # Παράλειψη μη έγκυρων γραμμών
-                        continue
+                        continue  # Αγνόηση μη έγκυρων γραμμών
 
                     id_str, xmin_str, ymin_str, xmax_str, ymax_str = parts
                     try:
@@ -70,17 +72,12 @@ class Grid:
                         xmax = float(xmax_str)
                         ymax = float(ymax_str)
 
-                        # Προαιρετικός έλεγχος εγκυρότητας (π.χ. xmin <= xmax)
                         if xmin > xmax or ymin > ymax:
-                            # Αγνοούμε αυτή τη γραμμή αν τα όρια είναι ασύμβατα
                             continue
-
-                        mbr = MBR(id_str, xmin, ymin, xmax, ymax)
-                        data.append(mbr)
+                        data.append(MBR(id_str, xmin, ymin, xmax, ymax))
                     except ValueError:
-                        # Αν κάποια τιμή δεν μπορεί να μετατραπεί σε float, αγνοούμε τη γραμμή
+                        # Αγνοούμε γραμμή αν δεν μετατρέπεται σε float
                         continue
-
         except FileNotFoundError:
             print(f"Το αρχείο '{filename}' δεν βρέθηκε.")
             return
@@ -88,73 +85,63 @@ class Grid:
             print(f"Σφάλμα κατά τη φόρτωση του αρχείου '{filename}': {e}")
             return
 
-        # Φυλάμε τη λίστα των MBRs στο λεξικό
         self.datasets[dataset_label] = data
-
-        # Αναθέτουμε τα MBRs στα αντίστοιχα κελιά
         self.assign_to_cells(data, dataset_label)
-
-        print(f"Φορτώθηκε το dataset '{dataset_label}' από το αρχείο '{filename}' με {len(data)} ορθογωνία.")
+        print(f"Φορτώθηκε το dataset '{dataset_label}' από το αρχείο '{filename}' με {len(data)} ορθογώνια.")
 
     def assign_to_cells(self, data, dataset_label):
         """
-        Αναθέτει κάθε MBR στα κελιά του grid που τέμνει.
-        Εδώ γίνεται μια βελτιστοποίηση υπολογίζοντας μόνο
-        τα απαραίτητα κελιά αντί να ελέγχουμε όλα τα m^2 κελιά.
+        Αναθέτει τα MBRs σε όλα τα κελιά του Grid που πιθανώς τα περιέχουν,
+        υπολογίζοντας τους δείκτες κελιών (i_min .. i_max, j_min .. j_max).
 
-        :param data: Λίστα με MBRs
-        :param dataset_label: Ετικέτα dataset
+        :param data: Λίστα με MBR αντικείμενα (π.χ. από ένα CSV).
+        :param dataset_label: Ετικέτα dataset (string).
         """
         if self.m == 0:
-            return  # Αποφυγή διαίρεσης με το 0, αν m=0
+            return  # Σε περίπτωση που m=0, δεν δημιουργούνται κελιά
 
         cell_size_x = (self.xU - self.xL) / self.m
         cell_size_y = (self.yU - self.yL) / self.m
 
         for mbr in data:
-            # Υπολογίζουμε τους ελάχιστους και μέγιστους indices i, j που καλύπτει το MBR
             i_min = int((mbr.xmin - self.xL) // cell_size_x)
             i_max = int((mbr.xmax - self.xL) // cell_size_x)
             j_min = int((mbr.ymin - self.yL) // cell_size_y)
             j_max = int((mbr.ymax - self.yL) // cell_size_y)
 
-            # "Σφίγγουμε" τα indices στα όρια του [0, m - 1]
             i_min = max(0, min(i_min, self.m - 1))
             i_max = max(0, min(i_max, self.m - 1))
             j_min = max(0, min(j_min, self.m - 1))
             j_max = max(0, min(j_max, self.m - 1))
 
-            # Προσθέτουμε το MBR σε κάθε κελί που πιθανώς τέμνει
             for i in range(i_min, i_max + 1):
                 for j in range(j_min, j_max + 1):
                     cell = self.cells[i][j]
-                    # Προαιρετικός έλεγχος intersects αν θες να είσαι απόλυτα σίγουρος
                     if cell.mbr.intersects(mbr):
                         cell.add_object(mbr, dataset_label)
 
     def get_dataset(self, dataset_label):
         """
-        Επιστρέφει το dataset με το συγκεκριμένο label (λίστα από MBRs).
-        Αν δεν υπάρχει, επιστρέφει κενή λίστα.
+        Επιστρέφει όλα τα MBRs που ανήκουν στο dataset με ετικέτα dataset_label.
+        Εάν δεν υπάρχει τέτοιο dataset, επιστρέφει κενή λίστα.
 
-        :param dataset_label: Ετικέτα dataset
-        :return: Λίστα MBRs
+        :param dataset_label: Ετικέτα (string) του dataset.
+        :return: Λίστα από MBR αντικείμενα.
         """
         return self.datasets.get(dataset_label, [])
 
     def find_cell(self, qx, qy):
         """
-        Βρίσκει το κελί που περιέχει το σημείο (qx, qy), αν το πλέγμα το καλύπτει.
-        Επιστρέφει το αντικείμενο Cell ή None αν το σημείο είναι εκτός ορίων.
+        Επιστρέφει το κελί που περιέχει το σημείο (qx, qy), αν αυτό βρίσκεται
+        εντός των ορίων του Grid. Επιστρέφει None αν βρίσκεται εκτός ορίων
+        ή αν δεν υπάρχουν καθόλου κελιά.
 
-        :param qx: Συντεταγμένη x
-        :param qy: Συντεταγμένη y
-        :return: Ένα αντικείμενο Cell ή None
+        :param qx: Συντεταγμένη x του σημείου.
+        :param qy: Συντεταγμένη y του σημείου.
+        :return: Ένα αντικείμενο Cell ή None.
         """
-        if not self.cells:  # Αν δεν υπάρχουν κελιά
+        if not self.cells:
             return None
-
-        # Έλεγχος αν (qx, qy) είναι εκτός των ορίων του grid
         if not (self.xL <= qx <= self.xU and self.yL <= qy <= self.yU):
             return None
 
@@ -164,32 +151,26 @@ class Grid:
         i = int((qx - self.xL) / cell_size_x)
         j = int((qy - self.yL) / cell_size_y)
 
-        # Διόρθωση για τα δεξιά / άνω όρια
-        if i == self.m:
-            i -= 1
-        if j == self.m:
-            j -= 1
+        if i == self.m: i -= 1
+        if j == self.m: j -= 1
 
         return self.cells[i][j]
 
     def find_cells_at_hops(self, qx, qy, hop):
         """
-        Βρίσκει όλα τα κελιά που βρίσκονται σε ακτίνα 'hop' (σε επίπεδο indices)
-        από το κελί που περιέχει το σημείο (qx, qy). Επιστρέφει λίστα από Cell.
+        Βρίσκει όλα τα κελιά που βρίσκονται σε ακτίνα 'hop' γύρω από το κελί
+        που περιέχει το σημείο (qx, qy). Η ακτίνα ορίζεται σε επίπεδο index
+        (π.χ. cell_i ± hop).
 
-        Σημείωση: Η υλοποίηση θεωρεί ότι το hop ορίζει
-        ένα τετράγωνο [i-hop, i+hop] x [j-hop, j+hop] γύρω από το αρχικό κελί.
-
-        :param qx: Συντεταγμένη x
-        :param qy: Συντεταγμένη y
-        :param hop: Απόσταση σε “κελιά”/indices
-        :return: Λίστα από Cell
+        :param qx: Συντεταγμένη x του σημείου αναζήτησης.
+        :param qy: Συντεταγμένη y του σημείου αναζήτησης.
+        :param hop: Απόσταση σε μονάδες κελιών (integer).
+        :return: Λίστα από Cell που βρίσκονται εντός αυτής της περιοχής.
         """
         initial_cell = self.find_cell(qx, qy)
         if not initial_cell:
             return []
 
-        # Εύρεση (i, j) του αρχικού κελιού
         cell_i, cell_j = -1, -1
         for i in range(self.m):
             for j in range(self.m):
@@ -200,28 +181,25 @@ class Grid:
                 break
 
         if cell_i == -1:
-            return []  # Δεν βρέθηκε κελί
+            return []
 
         neighbor_cells = []
-        # Εξετάζουμε όλα τα κελιά (i', j') για i' ∈ [cell_i - hop, cell_i + hop]
-        # και j' ∈ [cell_j - hop, cell_j + hop]
         for i in range(cell_i - hop, cell_i + hop + 1):
             for j in range(cell_j - hop, cell_j + hop + 1):
                 if 0 <= i < self.m and 0 <= j < self.m:
-                    # Εξαιρούμε το αρχικό κελί (προαιρετικό)
                     if i == cell_i and j == cell_j:
                         continue
                     neighbor_cells.append(self.cells[i][j])
-
         return neighbor_cells
 
     def get_object_by_id(self, obj_id):
         """
-        Επιστρέφει το πρώτο MBR που βρίσκει με το συγκεκριμένο ID, σε οποιοδήποτε dataset.
-        Διατρέχει όλα τα datasets που είναι φορτωμένα στο self.datasets.
+        Αναζητά ένα MBR με το συγκεκριμένο ID σε όλα τα loaded datasets
+        (π.χ. 'A', 'B', 'default') και επιστρέφει το πρώτο που βρεθεί.
+        Διαφορετικά, επιστρέφει None.
 
-        :param obj_id: Το string ID του αντικειμένου
-        :return: Το αντίστοιχο MBR ή None αν δεν βρεθεί
+        :param obj_id: Το ID (string) του αντικειμένου.
+        :return: Ένα αντικείμενο MBR ή None αν δεν βρεθεί.
         """
         for dataset in self.datasets.values():
             for obj in dataset:

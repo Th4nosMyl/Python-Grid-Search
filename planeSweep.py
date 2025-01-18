@@ -1,33 +1,49 @@
+# planeSweep.py
+
 class PlaneSweep:
     """
-    Υλοποίηση του Spatial Join με χρήση Plane Sweep (επίπεδο σάρωσης).
-    Δουλεύει κυρίως κατά τον άξονα x:
-    1. Συγκεντρώνουμε "events" (ακμές έναρξης και τέλους) για κάθε MBR.
-    2. Ταξινομούμε τα events κατά x.
-    3. Διατηρούμε λίστα ενεργών A, B και ελέγχουμε τομή (intersection) 
-       μόνο μεταξύ ενεργών (overlapping) MBRs κατά τον y άξονα.
+    Υλοποίηση Spatial Join με τη μέθοδο Plane Sweep. Η λογική βασίζεται κυρίως
+    στον άξονα x, όπου δημιουργούμε events (start/end) για τα MBRs, και διατηρούμε
+    λίστες ενεργών A και B για ελέγχους τομής κατά τον άξονα y.
     """
 
     @staticmethod
     def spatial_join(rectangles_A, rectangles_B):
         """
-        Εφαρμογή του Plane Sweep για Spatial Join μεταξύ δύο συνόλων ορθογωνίων.
-        
-        :param rectangles_A: Λίστα από MBRs (σύνολο Α).
-        :param rectangles_B: Λίστα από MBRs (σύνολο Β).
-        :return: Μια λίστα με tuples (rectA, rectB) για κάθε ζεύγος ορθογωνίων που τέμνονται.
+        Εκτελεί το Plane Sweep για Spatial Join μεταξύ δύο συνόλων ορθογωνίων (A και B).
+
+        Διαδικασία:
+          1. Δημιουργούμε "events" για κάθε ορθογώνιο:
+             - (A_start, xmin, rect)
+             - (A_end, xmax, rect)
+             - (B_start, xmin, rect)
+             - (B_end, xmax, rect)
+          2. Ταξινομούμε όλα τα events κατά x (και, δευτερευόντως, κατά τύπο event).
+          3. Διατηρούμε δύο λίστες ενεργών ορθογωνίων (active_A, active_B).
+          4. Για κάθε event:
+             - Αν είναι A_start, προσθέτουμε το rect στην active_A, ελέγχοντας τομή με κάθε B στην active_B.
+             - Αν είναι A_end, αφαιρούμε το rect από την active_A.
+             - Αν είναι B_start, προσθέτουμε το rect στην active_B, ελέγχοντας τομή με κάθε A στην active_A.
+             - Αν είναι B_end, αφαιρούμε το rect από την active_B.
+          5. Επιστρέφουμε όλα τα (rectA, rectB) ζεύγη που βρέθηκαν να τέμνονται.
+
+        :param rectangles_A: Λίστα από MBRs (σύνολο A).
+        :param rectangles_B: Λίστα από MBRs (σύνολο B).
+        :return: Λίστα με ζεύγη (rectA, rectB) που τέμνονται.
         """
         events = []
-        # Δημιουργούμε events για κάθε MBR του A
+
+        # Δημιουργία events για κάθε MBR του A
         for rect in rectangles_A:
             events.append(('A_start', rect.xmin, rect))
             events.append(('A_end', rect.xmax, rect))
-        # Δημιουργούμε events για κάθε MBR του B
+
+        # Δημιουργία events για κάθε MBR του B
         for rect in rectangles_B:
             events.append(('B_start', rect.xmin, rect))
             events.append(('B_end', rect.xmax, rect))
 
-        # Ταξινόμηση γεγονότων κατά x (και δευτερευόντως ανά τύπο event)
+        # Ταξινόμηση των events κατά x (και δευτερευόντως κατά event_type)
         events.sort(key=lambda event: (event[1], event[0]))
 
         active_A = []
@@ -36,25 +52,27 @@ class PlaneSweep:
 
         for event in events:
             event_type, x, rect = event
+
             if event_type == 'A_start':
-                # Προσθέτουμε το rect στην ενεργή λίστα του Α
                 active_A.append(rect)
-                # Ελέγχουμε τομή με όλα τα ενεργά B
+                # Έλεγχος τομής με όλα τα ενεργά B
                 for b in active_B:
                     if PlaneSweep.mbr_intersect(rect, b):
                         result.append((rect, b))
+
             elif event_type == 'A_end':
-                # Αφαιρούμε το rect από την ενεργή λίστα του Α
+                # Αφαιρούμε το rect από την active_A
                 active_A.remove(rect)
+
             elif event_type == 'B_start':
-                # Προσθέτουμε το rect στην ενεργή λίστα του Β
                 active_B.append(rect)
-                # Ελέγχουμε τομή με όλα τα ενεργά A
+                # Έλεγχος τομής με όλα τα ενεργά A
                 for a in active_A:
                     if PlaneSweep.mbr_intersect(a, rect):
                         result.append((a, rect))
+
             elif event_type == 'B_end':
-                # Αφαιρούμε το rect από την ενεργή λίστα του Β
+                # Αφαιρούμε το rect από την active_B
                 active_B.remove(rect)
 
         return result
@@ -62,11 +80,11 @@ class PlaneSweep:
     @staticmethod
     def mbr_intersect(rect1, rect2):
         """
-        Έλεγχος τομής δύο MBRs μέσω των x- και y-συντεταγμένων.
-        
+        Ελέγχει αν δύο MBRs (rect1, rect2) τέμνονται, βάσει x- και y-συντεταγμένων.
+
         :param rect1: Πρώτο MBR.
         :param rect2: Δεύτερο MBR.
-        :return: True αν τέμνονται, αλλιώς False.
+        :return: True αν έχουν τομή, αλλιώς False.
         """
         return not (
             rect1.xmax < rect2.xmin or

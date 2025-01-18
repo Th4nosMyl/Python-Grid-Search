@@ -1,85 +1,97 @@
+# spatialJoinPBSM.py
+
 import time
 from grid import Grid
 from MBR import MBR
 
 class SpatialJoinPBSM:
     """
-    Υλοποίηση του Spatial Join με χρήση του PBSM (Partition Based Spatial Merge).
-    Βασίζεται σε διαμέριση του χώρου (grid) και έλεγχο τομής
-    μόνο μεταξύ αντικειμένων που πέφτουν στο ίδιο κελί.
+    Υλοποιεί τον Spatial Join με χρήση του αλγορίθμου PBSM (Partition-Based Spatial Merge).
+    Η ιδέα βασίζεται στο ότι το Grid διαμερίζει το χώρο, και ελέγχουμε τομή μόνο
+    μεταξύ αντικειμένων (MBRs) που πέφτουν στο ίδιο κελί. Έτσι περιορίζουμε
+    τις συγκρίσεις σε μικρότερα, τοπικά σύνολα αντί να ελέγχουμε κάθε ζεύγος (a,b).
     """
 
     def __init__(self, grid):
         """
-        :param grid: Αντικείμενο Grid, στο οποίο θα πρέπει ήδη να έχουν φορτωθεί
-                     τα σύνολα 'A' και 'B' (π.χ. grid.load('A.csv', 'A')).
+        Αρχικοποιεί τον αλγόριθμο PBSM, δεσμευμένο πάνω σε ένα Grid. 
+        Το grid θα πρέπει να έχει ήδη φορτωμένα τα σύνολα 'A' και 'B'.
+
+        :param grid: Ένα αντικείμενο Grid, το οποίο περιέχει κελιά (Cell) και MBRs.
+                     Απαραίτητο είναι να υπάρχουν τα datasets 'A' και 'B'
+                     στο grid.datasets (π.χ. μετά από grid.load(...)).
         """
         self.grid = grid
-        self.results = set()  # Χρήση set για αποφυγή διπλοτύπων (π.χ. ίδιο ζεύγος)
+        self.results = set()  # Αποθηκεύουμε ζεύγη (a,b) σε set για να αποφύγουμε διπλοτύπους
 
     def execute_join(self):
         """
-        Εκτέλεση του Spatial Join χρησιμοποιώντας τον PBSM αλγόριθμο:
-          1. Ελέγχουμε αν υπάρχουν τα datasets 'A' και 'B' στο self.grid.
-          2. Για κάθε κελί (cell) του grid:
-             - Παίρνουμε όλα τα MBRs του A (π.χ. cell.objects['A']).
-             - Παίρνουμε όλα τα MBRs του B (π.χ. cell.objects['B']).
-             - Διπλός βρόχος ελέγχου τομής μεταξύ τους.
-             - Αν τέμνονται, προσθέτουμε το ζεύγος στο self.results (set).
-          3. Επιστρέφουμε (λίστα αποτελεσμάτων, stats_str) για να μπορούμε να εμφανίσουμε
-             / αποθηκεύσουμε τα στατιστικά στον κώδικα που το καλεί.
+        Εκτελεί τον Spatial Join με τον αλγόριθμο PBSM, ακολουθώντας τα εξής βήματα:
 
-        :return: (list_of_results, stats_str)
-                 όπου:
-                   list_of_results: λίστα από μοναδικά tuples (a, b) όπου a∈A, b∈B και a τέμνει b.
-                   stats_str: κείμενο με στατιστικά (χρόνος, πόσα κελιά παραλείφθηκαν κ.λπ.).
+        1. Ελέγχουμε αν υπάρχουν τα datasets 'A' και 'B' στο self.grid (αλλιώς δε μπορούμε να προχωρήσουμε).
+        2. Διατρέχουμε κάθε κελί (Cell) του πλέγματος (grid):
+           - Λαμβάνουμε τα αντικείμενα A (π.χ. cell.objects['A']) και τα αντικείμενα B (cell.objects['B']).
+           - Αν ένα από τα δύο σύνολα είναι άδειο, παρακάμπτουμε το κελί (skipped cells).
+           - Αλλιώς, με έναν διπλό βρόχο ελέγχουμε για κάθε (a, b) αν a.intersects(b). 
+             Αν ναι, καταχωρίζουμε το ζεύγος (a, b) στη λίστα αποτελεσμάτων.
+        3. Υπολογίζουμε τον χρόνο εκτέλεσης και δημιουργούμε μια συμβολοσειρά στατιστικών (stats_str)
+           που περιλαμβάνει:
+             - #συνολικών κελιών
+             - #κελιών που παραλείφθηκαν
+             - #κελιών που επεξεργάστηκαν
+             - #ζευγών (A,B) που εξετάστηκαν
+             - #ζευγών που βρέθηκαν να τέμνονται
+             - χρόνο εκτέλεσης
+        4. Επιστρέφουμε:
+            - Μια λίστα από μοναδικά ζεύγη (a, b) (αφού έχουμε χρησιμοποιήσει set στο self.results)
+            - Τη συμβολοσειρά stats_str με την αναφορά στατιστικών.
+
+        :return: Ένα tuple (results_list, stats_str), όπου:
+            results_list: λίστα ζευγών (a, b) που τέμνονται
+            stats_str: κείμενο με τις μετρήσεις και το χρόνο εκτέλεσης
         """
-
-        # 0. Έλεγχος ύπαρξης datasets
+        # 0. Έλεγχος για την ύπαρξη των datasets 'A', 'B'
         if 'A' not in self.grid.datasets or 'B' not in self.grid.datasets:
-            msg = "[SpatialJoinPBSM] Τα σύνολα 'A' και 'B' πρέπει να φορτωθούν πριν εκτελέσεις τον Spatial Join."
+            msg = "[SpatialJoinPBSM] Τα σύνολα 'A' και 'B' πρέπει να φορτωθούν πριν εκτελεστεί ο Spatial Join."
             print(msg)
-            return [], msg  # Επιστρέφουμε κενό και μήνυμα
+            return [], msg
 
-        # 1. Έναρξη χρονομέτρησης
-        start_time = time.time()
+        start_time = time.time()  # Έναρξη μέτρησης χρόνου
 
-        # 2. Προετοιμασία counters για στατιστικά
+        # Προετοιμάζουμε μετρητές στατιστικών
         total_cells = self.grid.m * self.grid.m
         skipped_cells = 0
         processed_cells = 0
-        pairs_checked = 0  # Πόσα ζεύγη (a, b) εξετάστηκαν;
+        pairs_checked = 0
 
-        # (ή αν δε θέλεις pairs_checked, μπορείς να το παραλείψεις.)
-
-        # 3. Επανάληψη σε κάθε κελί του grid
+        # Διατρέχουμε όλα τα κελιά στο grid
         for i in range(self.grid.m):
             for j in range(self.grid.m):
                 cell = self.grid.cells[i][j]
+
                 objects_A = cell.objects.get('A', [])
                 objects_B = cell.objects.get('B', [])
 
-                # Αν ένα από τα δύο σύνολα είναι άδειο, παραλείπουμε το κελί
+                # Αν δεν υπάρχουν αντικείμενα A ή B στο κελί, το παραλείπουμε
                 if not objects_A or not objects_B:
                     skipped_cells += 1
                     continue
 
-                # Αλλιώς, το επεξεργαζόμαστε
+                # Διαφορετικά, επεξεργαζόμαστε το κελί
                 processed_cells += 1
 
-                # Διπλός βρόχος ελέγχου τομής
+                # Διπλός βρόχος για κάθε ζεύγος (a, b)
                 for a in objects_A:
                     for b in objects_B:
                         pairs_checked += 1
                         if a.intersects(b):
                             self.results.add((a, b))
 
-        # 4. Υπολογισμός χρόνου
-        end_time = time.time()
-        elapsed = end_time - start_time
+        # Υπολογισμός χρόνου εκτέλεσης
+        elapsed = time.time() - start_time
 
-        # 5. Δημιουργία stats_str
-        join_count = len(self.results)  # Πόσα ζεύγη βρέθηκαν
+        # Δημιουργία αναφοράς στατιστικών
+        join_count = len(self.results)
         stats_str = (
             "[SpatialJoinPBSM] Στατιστικά:\n"
             f" • Συνολικά κελιά στο grid: {total_cells}\n"
@@ -90,8 +102,5 @@ class SpatialJoinPBSM:
             f" • Χρόνος εκτέλεσης: {elapsed:.4f} δευτερόλεπτα.\n"
         )
 
-        # 6. (Προαιρετικά) εκτύπωση στο console
         print(stats_str)
-
-        # 7. Επιστρέφουμε (results_list, stats_str)
         return list(self.results), stats_str
