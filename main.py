@@ -183,17 +183,40 @@ def main():
     # 1. Δημιουργία Αρχείου Δεδομένων
     # ------------------------------------
     if choice == menu[0]:
-        st.subheader("Δημιουργία Αρχείου Δεδομένων")
-        filename = st.text_input("Δώσε όνομα αρχείου (π.χ., data1.csv)", "data1.csv")
+        st.subheader("Δημιουργία Αρχείου Δεδομένων (CSV)")
+        filename = st.text_input("Δώσε όνομα CSV (π.χ. data1.csv):", value="data1.csv")
         num_rect = st.number_input("Αριθμός ορθογωνίων:", min_value=1, value=10)
         dataset_label = st.selectbox("Label dataset", ["A", "B", "default"])
-        if st.button("Δημιουργία"):
-            generator = PointGeneratorUnif(filename, grid.xL, grid.yL, grid.xU, grid.yU)
+        max_width = st.number_input("Μέγιστο πλάτος", min_value=0.0, value=1.0)
+        max_height = st.number_input("Μέγιστο ύψος", min_value=0.0, value=1.0)
+
+        if st.button("Δημιουργία & Λήψη"):
+            # 1. Φτιάχνουμε generator ΧΩΡΙΣ filename (δεν γράφουμε τοπικό αρχείο)
+            generator = PointGeneratorUnif(grid.xL, grid.yL, grid.xU, grid.yU)
+
             try:
-                generator.generate_rectangles(num_rect, include_id=True, dataset_label=dataset_label)
-                st.success(f"Δημιουργήθηκε το αρχείο {filename} με {num_rect} ορθογώνια.")
+                # 2. Παίρνουμε το CSV σαν string
+                csv_data = generator.generate_rectangles_in_memory(
+                    n=num_rect,
+                    include_id=True,
+                    dataset_label=dataset_label,
+                    max_width=max_width,
+                    max_height=max_height
+                )
+
+                # 3. Ενημέρωση χρήστη ότι δημιουργήθηκε
+                st.success(f"Δημιουργήθηκαν {num_rect} ορθογώνια σε CSV μορφή in-memory.")
+
+                # 4. Παρέχουμε δυνατότητα Download
+                st.download_button(
+                    label="Κατέβασε το CSV",
+                    data=csv_data,
+                    file_name=filename,       # π.χ. "data1.csv"
+                    mime="text/csv"
+                )
+
             except Exception as e:
-                st.error(f"Σφάλμα: {e}")
+                st.error(f"Σφάλμα κατά τη δημιουργία του CSV: {e}")
 
     # ------------------------------------
     # 2. Linear Scan
