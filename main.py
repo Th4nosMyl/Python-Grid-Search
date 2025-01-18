@@ -191,11 +191,15 @@ def main():
         max_height = st.number_input("Μέγιστο ύψος", min_value=0.0, value=1.0)
 
         if st.button("Δημιουργία & Λήψη"):
-            # 1. Φτιάχνουμε generator ΧΩΡΙΣ filename (δεν γράφουμε τοπικό αρχείο)
-            generator = PointGeneratorUnif(grid.xL, grid.yL, grid.xU, grid.yU)
+            # 1. Φτιάχνουμε generator όπως πριν, (μπορείς να αγνοήσεις το self.filename αν δε το χρησιμοποιείς)
+            generator = PointGeneratorUnif(
+                filename="ignored.csv",  # ή απλά κάτι placeholder
+                xL=grid.xL, yL=grid.yL,
+                xU=grid.xU, yU=grid.yU
+            )
 
             try:
-                # 2. Παίρνουμε το CSV σαν string
+                # 2. Παίρνουμε το CSV σαν string από την in_memory μέθοδο
                 csv_data = generator.generate_rectangles_in_memory(
                     n=num_rect,
                     include_id=True,
@@ -204,19 +208,20 @@ def main():
                     max_height=max_height
                 )
 
-                # 3. Ενημέρωση χρήστη ότι δημιουργήθηκε
+                # 3. Ενημερώνουμε το χρήστη
                 st.success(f"Δημιουργήθηκαν {num_rect} ορθογώνια σε CSV μορφή in-memory.")
 
-                # 4. Παρέχουμε δυνατότητα Download
+                # 4. Δίνουμε κουμπί download
                 st.download_button(
                     label="Κατέβασε το CSV",
                     data=csv_data,
-                    file_name=filename,       # π.χ. "data1.csv"
+                    file_name=filename,   # π.χ. "data1.csv"
                     mime="text/csv"
                 )
 
             except Exception as e:
                 st.error(f"Σφάλμα κατά τη δημιουργία του CSV: {e}")
+
 
     # ------------------------------------
     # 2. Linear Scan
