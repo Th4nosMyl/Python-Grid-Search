@@ -86,8 +86,8 @@
 
 1. **Κλώνος ή Λήψη**:  
    ```bash
-   git clone https://github.com/YourUsername/GridBasedSpatialApp.git
-   cd GridBasedSpatialApp
+   git clone https://github.com/Th4nosMyl/Python-Grid-Search.git
+   cd Python-Grid-Search-main
 2. **Εγκατάσταση Βιβλιοθηκών (μέσω requirements.txt):**
     ```bash
     pip install -r requirements.txt
